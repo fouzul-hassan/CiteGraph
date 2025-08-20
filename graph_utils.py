@@ -205,60 +205,106 @@ class CitationGraphBuilder:
 
 class CitationGraphVisualizer:
     """Visualizes citation graphs using pyvis and Plotly"""
-    
+
     def __init__(self):
         """Initialize the visualizer"""
         self.network = None
-    
-    def create_interactive_network(self, graph_data: Dict, height: str = "600px") -> str:
-        """Create an interactive network visualization using pyvis"""
+
+    def create_interactive_network(
+        self,
+        graph_data: Dict,
+        height: str = "600px",
+        physics_enabled: bool = True,
+        layout: str = "force",
+        scale_by_citations: bool = True,
+        show_legend: bool = True
+    ) -> str:
+        """Create an interactive network visualization using pyvis
+
+        Args:
+            graph_data: Graph data dict with 'nodes' and 'edges'
+            height: Canvas height (e.g., '700px')
+            physics_enabled: Toggle physics simulation
+            layout: 'force' or 'hierarchical'
+            scale_by_citations: Scale node size by citation count
+            show_legend: Include a floating legend overlay
+        """
         try:
             # Create pyvis network
             net = Network(height=height, width="100%", bgcolor="#ffffff", font_color="#000000")
-            
+
+            # Determine scaling
+            max_citations = 0
+            if scale_by_citations:
+                for node in graph_data.get('nodes', []):
+                    max_citations = max(max_citations, node.get('citation_count', 0) or 0)
+                max_citations = max_citations or 1
+
             # Add nodes
             for node in graph_data.get('nodes', []):
                 node_id = node['id']
                 label = node.get('label', node_id)
                 title = node.get('title', '')
                 year = node.get('year', '')
-                citation_count = node.get('citation_count', 0)
+                citation_count = node.get('citation_count', 0) or 0
                 group = node.get('group', 'default')
-                
-                # Set node properties based on group
+                highlighted = node.get('highlighted', False)
+
+                # Base color and size by group
                 if group == 'root':
                     color = '#e74c3c'
-                    size = 25
+                    base_size = 22
+                    shape = 'diamond'
                 elif group == 'citation':
                     color = '#3498db'
-                    size = 20
+                    base_size = 18
+                    shape = 'dot'
                 elif group == 'reference':
                     color = '#f39c12'
-                    size = 20
+                    base_size = 18
+                    shape = 'dot'
                 elif group == 'related':
                     color = '#00b894'
-                    size = 18
+                    base_size = 16
+                    shape = 'dot'
                 elif group == 'expanded_citation':
                     color = '#9b59b6'
-                    size = 18
+                    base_size = 16
+                    shape = 'dot'
                 elif group == 'most_relevant':
                     color = '#f1c40f'
-                    size = 22
+                    base_size = 20
+                    shape = 'star'
                 else:
                     color = '#95a5a6'
-                    size = 15
-                
+                    base_size = 14
+                    shape = 'dot'
+
+                # Scale by citations
+                if scale_by_citations:
+                    scaled = base_size + (22 * (citation_count / max_citations))
+                    size = max(base_size, min(scaled, 40))
+                else:
+                    size = base_size
+
+                # Highlighting
+                if highlighted:
+                    color = '#2ecc71'
+                    size = max(size, base_size + 6)
+                    shape = 'star'
+
                 # Create hover title
                 hover_title = f"Title: {title}\nYear: {year}\nCitations: {citation_count}"
-                
+
                 net.add_node(
-                    node_id, 
-                    label=label, 
+                    node_id,
+                    label=label,
                     title=hover_title,
                     color=color,
-                    size=size
+                    size=size,
+                    shape=shape
                 )
-            
+
             # Add edges
             for edge in graph_data.get('edges', []):
                 from_node = edge['from']
@@ -266,38 +312,87 @@ class CitationGraphVisualizer:
                 color = edge.get('color', '#2c3e50')
                 arrows = edge.get('arrows', 'to')
                 dashes = edge.get('dashes', False)
-                
+
                 net.add_edge(
-                    from_node, 
-                    to_node, 
+                    from_node,
+                    to_node,
                     color=color,
                     arrows=arrows,
                     width=2,
                     dashes=dashes
                 )
-            
-            # Configure physics
-            net.set_options("""
-            var options = {
-              "physics": {
-                "forceAtlas2Based": {
-                  "gravitationalConstant": -50,
-                  "centralGravity": 0.01,
-                  "springLength": 100,
-                  "springConstant": 0.08
-                },
-                "maxVelocity": 50,
-                "minVelocity": 0.1,
-                "solver": "forceAtlas2Based",
-                "timestep": 0.35
-              }
-            }
-            """)
-            
+
+            # Configure layout and physics
+            if layout == 'hierarchical':
+                options = {
+                    "layout": {
+                        "hierarchical": {
+                            "enabled": True,
+                            "direction": "UD",
+                            "sortMethod": "hubsize",
+                            "levelSeparation": 150,
+                            "nodeSpacing": 150
+                        }
+                    },
+                    "physics": {
+                        "enabled": physics_enabled,
+                        "hierarchicalRepulsion": {
+                            "centralGravity": 0.0,
+                            "springLength": 150,
+                            "springConstant": 0.01,
+                            "nodeDistance": 200
+                        },
+                        "solver": "hierarchicalRepulsion",
+                        "stabilization": {"iterations": 200}
+                    }
+                }
+            else:
+                options = {
+                    "physics": {
+                        "enabled": physics_enabled,
+                        "forceAtlas2Based": {
+                            "gravitationalConstant": -60,
+                            "centralGravity": 0.01,
+                            "springLength": 120,
+                            "springConstant": 0.08
+                        },
+                        "maxVelocity": 60,
+                        "minVelocity": 0.1,
+                        "solver": "forceAtlas2Based",
+                        "timestep": 0.35,
+                        "stabilization": {"iterations": 250}
+                    }
+                }
+
+            # Apply options
+            import json as _json
+            net.set_options(f"var options = {_json.dumps(options)}")
+
             # Save to HTML string
             html_string = net.generate_html()
+
+            # Inject legend overlay
+            if show_legend:
+                legend_html = (
+                    "<div style=\"position:fixed; right:16px; bottom:16px; background:rgba(255,255,255,0.9);"
+                    "padding:12px 14px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.15);"
+                    "font-family:Inter,system-ui,Segoe UI,Roboto,Arial; font-size:13px; z-index:9999;\">"
+                    "<div style=\"font-weight:600; margin-bottom:6px;\">Legend</div>"
+                    "<div style=\"display:flex; gap:10px; flex-wrap:wrap; max-width:320px;\">"
+                    "<span><span style=\"display:inline-block; width:10px; height:10px; background:#e74c3c; border-radius:50%; margin-right:6px;\"></span>Root</span>"
+                    "<span><span style=\"display:inline-block; width:10px; height:10px; background:#3498db; border-radius:50%; margin-right:6px;\"></span>Citation</span>"
+                    "<span><span style=\"display:inline-block; width:10px; height:10px; background:#f39c12; border-radius:50%; margin-right:6px;\"></span>Reference</span>"
+                    "<span><span style=\"display:inline-block; width:10px; height:10px; background:#00b894; border-radius:50%; margin-right:6px;\"></span>Related</span>"
+                    "<span><span style=\"display:inline-block; width:10px; height:10px; background:#9b59b6; border-radius:50%; margin-right:6px;\"></span>Expanded</span>"
+                    "<span><span style=\"display:inline-block; width:10px; height:10px; background:#f1c40f; border-radius:50%; margin-right:6px;\"></span>Most Relevant</span>"
+                    "<span><span style=\"display:inline-block; width:10px; height:10px; background:#2ecc71; border-radius:50%; margin-right:6px;\"></span>Highlighted</span>"
+                    "</div></div>"
+                )
+                if '</body>' in html_string:
+                    html_string = html_string.replace('</body>', legend_html + '</body>')
+
             return html_string
-            
+
         except Exception as e:
             print(f"Error creating interactive network: {e}")
             return f"<p>Error creating visualization: {e}</p>"
@@ -435,7 +530,7 @@ class CitationGraphVisualizer:
             )
             return fig
     
-    def create_network_metrics_dashboard(self, graph_stats: Dict, centrality_data: Dict) -> go.Figure:
+    def create_network_metrics_dashboard(self, graph_stats: Dict, centrality_data: Dict, nodes: Optional[List[Dict]] = None) -> go.Figure:
         """Create a dashboard showing network metrics"""
         try:
             # Create subplots
@@ -474,11 +569,20 @@ class CitationGraphVisualizer:
                     row=1, col=2
                 )
             
-            # Top Cited Papers (placeholder - would need paper titles)
-            citation_counts = [node.get('citation_count', 0) for node in 
-                             [{'citation_count': 0}] * 5]  # Placeholder
+            # Top Cited Papers (use actual nodes if provided)
+            top_x = []
+            top_y = []
+            if nodes:
+                try:
+                    top_nodes = sorted(nodes, key=lambda n: n.get('citation_count', 0), reverse=True)[:5]
+                    top_x = [n.get('label') or n.get('title') or n.get('id') for n in top_nodes]
+                    top_y = [n.get('citation_count', 0) for n in top_nodes]
+                except Exception:
+                    top_x, top_y = list(range(1, 6)), [0]*5
+            else:
+                top_x, top_y = list(range(1, 6)), [0]*5
             fig.add_trace(
-                go.Bar(x=list(range(1, 6)), y=citation_counts, name='Top Papers', marker_color='#f39c12'),
+                go.Bar(x=top_x, y=top_y, name='Top Papers', marker_color='#f39c12'),
                 row=2, col=1
             )
             

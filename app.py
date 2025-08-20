@@ -471,6 +471,43 @@ if expand_network:
 else:
     expansion_depth = 0
 
+# Graph rendering settings
+st.sidebar.markdown("---")
+st.sidebar.header("🎛️ Graph Settings")
+
+physics_enabled = st.sidebar.checkbox(
+    "Enable Physics",
+    value=True,
+    help="Toggle force simulation for the network layout"
+)
+
+layout_choice = st.sidebar.selectbox(
+    "Layout",
+    options=["Force-directed", "Hierarchical"],
+    index=0,
+    help="Choose how nodes are arranged"
+)
+
+scale_by_citations = st.sidebar.checkbox(
+    "Scale Nodes by Citations",
+    value=True,
+    help="Larger nodes indicate higher citation counts"
+)
+
+show_legend = st.sidebar.checkbox(
+    "Show Legend Overlay",
+    value=True,
+    help="Display an always-visible legend on the graph"
+)
+
+top_relevant_n = st.sidebar.slider(
+    "Highlight Top N Relevant",
+    min_value=0,
+    max_value=10,
+    value=5,
+    help="Number of most relevant papers to highlight"
+)
+
 # Main content area
 if st.session_state.current_doi and st.session_state.current_paper:
     # Paper information section
@@ -643,37 +680,34 @@ if st.session_state.current_doi and st.session_state.current_paper:
                     })
             
             # 🔥 NEW: Expand network by fetching citations for cited papers
+            citations_expansion = {'most_cited_papers': []}
             if expansion_depth > 0:
                 st.info(f"🔍 Expanding network: Finding citations for cited papers (depth {expansion_depth})...")
                 print(f"🔍 DEBUG: Expanding network by fetching citations for cited papers at depth {expansion_depth}")
-                
                 # Fetch citations for the citation papers
                 citations_expansion = fetch_citations_for_cited_papers(citations, depth=expansion_depth, limit_per_paper=3)
-            
-            if citations_expansion['most_cited_papers']:
-                print(f"🔍 DEBUG: Adding {len(citations_expansion['most_cited_papers'])} expanded citation papers")
-                
-                for i, exp_paper in enumerate(citations_expansion['most_cited_papers']):
-                    print(f"🔍 DEBUG: Adding expanded citation paper {i+1}: {exp_paper['doi']}")
-                    
-                    # Add to graph nodes
-                    st.session_state.graph_data['nodes'].append({
-                        'id': exp_paper['doi'],
-                        'label': exp_paper['title'][:50] + '...' if len(exp_paper['title']) > 50 else exp_paper['title'],
-                        'title': exp_paper['title'],
-                        'year': exp_paper['year'],
-                        'citation_count': exp_paper['citation_count'],
-                        'group': 'expanded_citation'
-                    })
-                    
-                    # Connect to the paper it cites
-                    st.session_state.graph_data['edges'].append({
-                        'from': exp_paper['doi'],
-                        'to': exp_paper['cites_paper'],
-                        'arrows': 'to',
-                        'color': '#9b59b6',
-                        'dashes': False
-                    })
+
+                if citations_expansion.get('most_cited_papers'):
+                    print(f"🔍 DEBUG: Adding {len(citations_expansion['most_cited_papers'])} expanded citation papers")
+                    for i, exp_paper in enumerate(citations_expansion['most_cited_papers']):
+                        print(f"🔍 DEBUG: Adding expanded citation paper {i+1}: {exp_paper['doi']}")
+                        # Add to graph nodes
+                        st.session_state.graph_data['nodes'].append({
+                            'id': exp_paper['doi'],
+                            'label': exp_paper['title'][:50] + '...' if len(exp_paper['title']) > 50 else exp_paper['title'],
+                            'title': exp_paper['title'],
+                            'year': exp_paper['year'],
+                            'citation_count': exp_paper['citation_count'],
+                            'group': 'expanded_citation'
+                        })
+                        # Connect to the paper it cites
+                        st.session_state.graph_data['edges'].append({
+                            'from': exp_paper['doi'],
+                            'to': exp_paper['cites_paper'],
+                            'arrows': 'to',
+                            'color': '#9b59b6',
+                            'dashes': False
+                        })
             
             # 🔥 NEW: Find most relevant papers from the entire network
             st.info("🔍 Analyzing network: Finding most relevant papers...")
@@ -684,18 +718,16 @@ if st.session_state.current_doi and st.session_state.current_paper:
             
             most_relevant = find_most_relevant_papers(all_papers, keywords)
             
-            if most_relevant:
+            if most_relevant and top_relevant_n > 0:
                 print(f"🔍 DEBUG: Found {len(most_relevant)} most relevant papers")
-                
-                # Highlight top 5 most relevant papers
-                for i, rel_paper in enumerate(most_relevant[:5]):
+                # Highlight top N most relevant papers
+                for i, rel_paper in enumerate(most_relevant[:top_relevant_n]):
                     print(f"🔍 DEBUG: Top relevant paper {i+1}: {rel_paper['id']} (score: {rel_paper['relevance_score']})")
-                    
-                    # Update node to highlight as most relevant
                     for node in st.session_state.graph_data['nodes']:
                         if node['id'] == rel_paper['id']:
                             node['group'] = 'most_relevant'
-                            node['label'] = f"⭐ {node['label']}"  # Add star to label
+                            node['label'] = f"⭐ {node['label']}"
+                            node['highlighted'] = True
                             break
             
             print(f"🔍 DEBUG: Final graph has {len(st.session_state.graph_data['nodes'])} nodes and {len(st.session_state.graph_data['edges'])} edges")
@@ -741,284 +773,247 @@ if st.session_state.current_doi and st.session_state.current_paper:
     graph_stats = graph_builder.get_graph_statistics()
     centrality_data = graph_builder.get_centrality_measures()
     
-    # Display metrics
-    st.header("📊 Network Metrics")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Total Papers", graph_stats['total_nodes'])
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Total Connections", graph_stats['total_edges'])
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Network Density", f"{graph_stats['density']:.4f}")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Components", graph_stats['connected_components'])
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Interactive Network Visualization
-    st.header("🕸️ Citation Network")
-    
-    # Add refresh button
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("""
-        <div class="info-box">
-            <h4>📚 Understanding the Network:</h4>
-            <ul>
-                <li><strong>🔴 Red Node</strong>: Your selected paper (root)</li>
-                <li><strong>🔵 Blue Nodes</strong>: Papers that cite your paper (forward in time)</li>
-                <li><strong>🟠 Orange Nodes</strong>: Papers your paper references (backward in time)</li>
-                <li><strong>🟢 Green Nodes</strong>: Related papers (thematically connected)</li>
-                <li><strong>🟣 Purple Nodes</strong>: Papers that cite your citations (expanded network)</li>
-                <li><strong>⭐ Starred Nodes</strong>: Most relevant papers (highest impact)</li>
-                <li><strong>Solid Arrows</strong>: Direct citation relationships</li>
-                <li><strong>Dashed Lines</strong>: Thematic relationships</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        if st.button("🔄 Refresh Network", type="secondary"):
-            st.session_state.graph_data = None
-            st.session_state.timeline_data = None
-            st.rerun()
-    
-    # Create interactive network
-    network_html = visualizer.create_interactive_network(filtered_graph_data, height="600px")
-    
-    # Display the network
-    st.components.v1.html(network_html, height=600)
-    
-    # 🔥 NEW: Most Relevant Papers Section
-    st.header("⭐ Most Relevant Papers")
-    
-    # Get most relevant papers from the current graph
-    if st.session_state.graph_data:
-        all_papers = st.session_state.graph_data['nodes']
-        keywords = st.session_state.current_paper.get('keywords', []) if st.session_state.current_paper else []
-        
-        most_relevant = find_most_relevant_papers(all_papers, keywords)
-        
-        if most_relevant:
-            st.success(f"🎯 Found {len(most_relevant)} most relevant papers based on citation count, recency, and journal impact")
-            
-            # Display top papers in a nice format
-            for i, paper in enumerate(most_relevant[:10]):
-                with st.expander(f"#{i+1} - {paper['title']} (Score: {paper['relevance_score']})"):
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.write(f"**ID:** {paper['id']}")
-                        if paper.get('authors'):
-                            st.write(f"**Authors:** {', '.join(paper['authors'])}")
-                        st.write(f"**Journal:** {paper.get('journal', 'N/A')} ({paper.get('year', 'N/A')})")
-                        if paper.get('abstract'):
-                            st.write(f"**Abstract:** {paper['abstract']}")
-                        if paper.get('keywords'):
-                            st.write("**Keywords:** " + ", ".join([f"`{kw}`" for kw in paper['keywords']]))
-                    
-                    with col2:
-                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                        st.metric("Citations", paper['citation_count'])
-                        st.metric("Year", paper['year'])
-                        if paper.get('relevance_score'):
-                            st.metric("Relevance", f"{paper['relevance_score']}")
-                        st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.warning("No relevant papers found to analyze.")
-    
-    # 🔥 NEW: Network Insights Section
-    st.header("🔍 Network Insights")
-    
-    if st.session_state.graph_data:
-        col1, col2, col3 = st.columns(3)
-        
+    # Tabs for a cleaner UI
+    tab_network, tab_insights, tab_timeline, tab_papers, tab_export, tab_debug = st.tabs([
+        "🕸️ Network", "🔍 Insights", "📈 Timeline", "📋 Papers", "💾 Export", "🧪 Debug"
+    ])
+
+    with tab_network:
+        # Display metrics
+        st.header("📊 Network Metrics")
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            # Papers by group
-            groups = {}
-            for node in st.session_state.graph_data['nodes']:
-                group = node.get('group', 'unknown')
-                groups[group] = groups.get(group, 0) + 1
-            
-            st.subheader("📊 Papers by Type")
-            for group, count in groups.items():
-                if group == 'root':
-                    st.write(f"🔴 **Root Paper:** {count}")
-                elif group == 'reference':
-                    st.write(f"🟠 **References:** {count}")
-                elif group == 'citation':
-                    st.write(f"🔵 **Citations:** {count}")
-                elif group == 'related':
-                    st.write(f"🟢 **Related:** {count}")
-                elif group == 'expanded_citation':
-                    st.write(f"🟣 **Expanded Citations:** {count}")
-                elif group == 'most_relevant':
-                    st.write(f"⭐ **Most Relevant:** {count}")
-                else:
-                    st.write(f"⚪ **{group.title()}:** {count}")
-        
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.metric("Total Papers", graph_stats['total_nodes'])
+            st.markdown('</div>', unsafe_allow_html=True)
         with col2:
-            # Citation distribution
-            citation_counts = [node.get('citation_count', 0) for node in st.session_state.graph_data['nodes']]
-            if citation_counts:
-                st.subheader("📈 Citation Distribution")
-                st.write(f"**Highest:** {max(citation_counts)}")
-                st.write(f"**Average:** {sum(citation_counts) / len(citation_counts):.1f}")
-                st.write(f"**Total:** {sum(citation_counts)}")
-        
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.metric("Total Connections", graph_stats['total_edges'])
+            st.markdown('</div>', unsafe_allow_html=True)
         with col3:
-            # Year distribution
-            years = [node.get('year', 0) for node in st.session_state.graph_data['nodes'] if node.get('year')]
-            if years:
-                st.subheader("📅 Year Distribution")
-                st.write(f"**Oldest:** {min(years)}")
-                st.write(f"**Newest:** {max(years)}")
-                st.write(f"**Span:** {max(years) - min(years)} years")
-    
-    # 🔥 NEW: Expanded Network Statistics
-    if expansion_depth > 0 and st.session_state.graph_data:
-        st.header("🔄 Expanded Network Statistics")
-        
-        # Count expanded citations
-        expanded_nodes = [node for node in st.session_state.graph_data['nodes'] if node.get('group') == 'expanded_citation']
-        
-        if expanded_nodes:
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.metric("Network Density", f"{graph_stats['density']:.4f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with col4:
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.metric("Components", graph_stats['connected_components'])
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # Interactive Network Visualization
+        st.header("🕸️ Citation Network")
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            st.markdown("""
+            <div class=\"info-box\">
+                <h4>📚 Understanding the Network:</h4>
+                <ul>
+                    <li><strong>🔴 Red Node</strong>: Your selected paper (root)</li>
+                    <li><strong>🔵 Blue Nodes</strong>: Papers that cite your paper (forward in time)</li>
+                    <li><strong>🟠 Orange Nodes</strong>: Papers your paper references (backward in time)</li>
+                    <li><strong>🟢 Green Nodes</strong>: Related papers (thematically connected)</li>
+                    <li><strong>🟣 Purple Nodes</strong>: Papers that cite your citations (expanded network)</li>
+                    <li><strong>⭐ Starred Nodes</strong>: Most relevant papers (highest impact)</li>
+                    <li><strong>Solid Arrows</strong>: Direct citation relationships</li>
+                    <li><strong>Dashed Lines</strong>: Thematic relationships</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_b:
+            if st.button("🔄 Refresh Network", type="secondary"):
+                st.session_state.graph_data = None
+                st.session_state.timeline_data = None
+                st.rerun()
+
+        network_html = visualizer.create_interactive_network(
+            filtered_graph_data,
+            height="650px",
+            physics_enabled=physics_enabled,
+            layout='hierarchical' if layout_choice == 'Hierarchical' else 'force',
+            scale_by_citations=scale_by_citations,
+            show_legend=show_legend
+        )
+        st.components.v1.html(network_html, height=650)
+        st.download_button(
+            label="💾 Download Graph HTML",
+            data=network_html,
+            file_name=f"citegraph_{st.session_state.current_doi.replace('/', '_')}.html",
+            mime="text/html"
+        )
+
+    with tab_insights:
+        st.header("⭐ Most Relevant Papers")
+        if st.session_state.graph_data:
+            all_papers = st.session_state.graph_data['nodes']
+            keywords = st.session_state.current_paper.get('keywords', []) if st.session_state.current_paper else []
+            most_relevant = find_most_relevant_papers(all_papers, keywords)
+            if most_relevant:
+                st.success(f"🎯 Found {len(most_relevant)} most relevant papers based on citation count, recency, and journal impact")
+                for i, paper in enumerate(most_relevant[:10]):
+                    with st.expander(f"#{i+1} - {paper['title']} (Score: {paper['relevance_score']})"):
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.write(f"**ID:** {paper['id']}")
+                            if paper.get('authors'):
+                                st.write(f"**Authors:** {', '.join(paper['authors'])}")
+                            st.write(f"**Journal:** {paper.get('journal', 'N/A')} ({paper.get('year', 'N/A')})")
+                            if paper.get('abstract'):
+                                st.write(f"**Abstract:** {paper['abstract']}")
+                            if paper.get('keywords'):
+                                st.write("**Keywords:** " + ", ".join([f"`{kw}`" for kw in paper['keywords']]))
+                        with col2:
+                            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                            st.metric("Citations", paper['citation_count'])
+                            st.metric("Year", paper['year'])
+                            if paper.get('relevance_score'):
+                                st.metric("Relevance", f"{paper['relevance_score']}")
+                            st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.warning("No relevant papers found to analyze.")
+
+        st.header("🔍 Network Insights")
+        if st.session_state.graph_data:
             col1, col2, col3 = st.columns(3)
-            
             with col1:
-                st.metric("Expanded Citations", len(expanded_nodes))
-            
+                groups = {}
+                for node in st.session_state.graph_data['nodes']:
+                    group = node.get('group', 'unknown')
+                    groups[group] = groups.get(group, 0) + 1
+                st.subheader("📊 Papers by Type")
+                for group, count in groups.items():
+                    if group == 'root':
+                        st.write(f"🔴 **Root Paper:** {count}")
+                    elif group == 'reference':
+                        st.write(f"🟠 **References:** {count}")
+                    elif group == 'citation':
+                        st.write(f"🔵 **Citations:** {count}")
+                    elif group == 'related':
+                        st.write(f"🟢 **Related:** {count}")
+                    elif group == 'expanded_citation':
+                        st.write(f"🟣 **Expanded Citations:** {count}")
+                    elif group == 'most_relevant':
+                        st.write(f"⭐ **Most Relevant:** {count}")
+                    else:
+                        st.write(f"⚪ **{group.title()}:** {count}")
             with col2:
-                avg_citations = sum(node.get('citation_count', 0) for node in expanded_nodes) / len(expanded_nodes)
-                st.metric("Avg Citations (Expanded)", f"{avg_citations:.1f}")
-            
+                citation_counts = [node.get('citation_count', 0) for node in st.session_state.graph_data['nodes']]
+                if citation_counts:
+                    st.subheader("📈 Citation Distribution")
+                    st.write(f"**Highest:** {max(citation_counts)}")
+                    st.write(f"**Average:** {sum(citation_counts) / len(citation_counts):.1f}")
+                    st.write(f"**Total:** {sum(citation_counts)}")
             with col3:
-                total_new_connections = len([edge for edge in st.session_state.graph_data['edges'] 
-                                          if any(node['id'] == edge['from'] or node['id'] == edge['to'] 
-                                                for node in expanded_nodes)])
-                st.metric("New Connections", total_new_connections)
-            
-            # Show top expanded papers
-            st.subheader("📊 Top Expanded Citation Papers")
-            expanded_sorted = sorted(expanded_nodes, key=lambda x: x.get('citation_count', 0), reverse=True)
-            
-            for i, paper in enumerate(expanded_sorted[:5]):
-                st.write(f"**{i+1}.** {paper['title']} ({paper['citation_count']} citations)")
+                years = [node.get('year', 0) for node in st.session_state.graph_data['nodes'] if node.get('year')]
+                if years:
+                    st.subheader("📅 Year Distribution")
+                    st.write(f"**Oldest:** {min(years)}")
+                    st.write(f"**Newest:** {max(years)}")
+                    st.write(f"**Span:** {max(years) - min(years)} years")
+
+        if expansion_depth > 0 and st.session_state.graph_data:
+            st.header("🔄 Expanded Network Statistics")
+            expanded_nodes = [node for node in st.session_state.graph_data['nodes'] if node.get('group') == 'expanded_citation']
+            if expanded_nodes:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Expanded Citations", len(expanded_nodes))
+                with col2:
+                    avg_citations = sum(node.get('citation_count', 0) for node in expanded_nodes) / len(expanded_nodes)
+                    st.metric("Avg Citations (Expanded)", f"{avg_citations:.1f}")
+                with col3:
+                    total_new_connections = len([edge for edge in st.session_state.graph_data['edges'] 
+                                              if any(node['id'] == edge['from'] or node['id'] == edge['to'] 
+                                                    for node in expanded_nodes)])
+                    st.metric("New Connections", total_new_connections)
+                st.subheader("📊 Top Expanded Citation Papers")
+                expanded_sorted = sorted(expanded_nodes, key=lambda x: x.get('citation_count', 0), reverse=True)
+                for i, paper in enumerate(expanded_sorted[:5]):
+                    st.write(f"**{i+1}.** {paper['title']} ({paper['citation_count']} citations)")
+            else:
+                st.info("No expanded citations found. Try increasing the expansion depth.")
+
+    with tab_timeline:
+        st.header("📈 Knowledge Evolution Timeline")
+        timeline_fig = visualizer.create_timeline_chart(st.session_state.timeline_data)
+        st.plotly_chart(timeline_fig, use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📊 Citation Distribution")
+            citation_dist_fig = visualizer.create_citation_distribution_chart(filtered_graph_data)
+            st.plotly_chart(citation_dist_fig, use_container_width=True)
+        with col2:
+            st.subheader("📊 Network Metrics Dashboard")
+            metrics_fig = visualizer.create_network_metrics_dashboard(graph_stats, centrality_data, nodes=filtered_graph_data['nodes'])
+            st.plotly_chart(metrics_fig, use_container_width=True)
+
+    with tab_papers:
+        st.header("📋 Paper Details")
+        papers_df = pd.DataFrame(filtered_nodes)
+        if not papers_df.empty:
+            column_order = ['id', 'title', 'year', 'citation_count', 'group']
+            available_columns = [col for col in column_order if col in papers_df.columns]
+            papers_df = papers_df[available_columns]
+            st.dataframe(papers_df, use_container_width=True, hide_index=True)
         else:
-            st.info("No expanded citations found. Try increasing the expansion depth.")
-    
-    # Debug section
-    with st.expander("🔍 DEBUG: Graph Data Details"):
-        st.write("**Current Graph Data:**")
-        st.write(f"**Total Nodes:** {len(filtered_graph_data['nodes'])}")
-        st.write(f"**Total Edges:** {len(filtered_graph_data['edges'])}")
-        
-        if filtered_graph_data['nodes']:
-            st.write("**Nodes by Group:**")
-            groups = {}
-            for node in filtered_graph_data['nodes']:
-                group = node.get('group', 'unknown')
-                groups[group] = groups.get(group, 0) + 1
-            
-            for group, count in groups.items():
-                st.write(f"- {group}: {count} papers")
-            
-            st.write("**Sample Nodes:**")
-            for i, node in enumerate(filtered_graph_data['nodes'][:5]):
-                st.write(f"{i+1}. {node.get('title', 'No title')} ({node.get('group', 'No group')})")
-        
-        if filtered_graph_data['edges']:
-            st.write("**Sample Edges:**")
-            for i, edge in enumerate(filtered_graph_data['edges'][:5]):
-                st.write(f"{i+1}. {edge['from']} → {edge['to']} ({edge.get('color', 'No color')})")
-    
-    # Timeline and Knowledge Evolution
-    st.header("📈 Knowledge Evolution Timeline")
-    
-    # Create timeline chart
-    timeline_fig = visualizer.create_timeline_chart(st.session_state.timeline_data)
-    st.plotly_chart(timeline_fig, use_container_width=True)
-    
-    # Additional visualizations
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📊 Citation Distribution")
-        citation_dist_fig = visualizer.create_citation_distribution_chart(filtered_graph_data)
-        st.plotly_chart(citation_dist_fig, use_container_width=True)
-    
-    with col2:
-        st.subheader("📊 Network Metrics Dashboard")
-        metrics_fig = visualizer.create_network_metrics_dashboard(graph_stats, centrality_data)
-        st.plotly_chart(metrics_fig, use_container_width=True)
-    
-    # Data table
-    st.header("📋 Paper Details")
-    
-    # Convert to DataFrame for display
-    papers_df = pd.DataFrame(filtered_nodes)
-    if not papers_df.empty:
-        # Reorder columns for better display
-        column_order = ['id', 'title', 'year', 'citation_count', 'group']
-        available_columns = [col for col in column_order if col in papers_df.columns]
-        papers_df = papers_df[available_columns]
-        
-        st.dataframe(papers_df, use_container_width=True, hide_index=True)
-    else:
-        st.warning("No papers match the current filters.")
-    
-    # Export options
-    st.header("💾 Export & Share")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Export graph data
-        export_format = st.selectbox("Export Format:", ["JSON", "CSV"])
-        if st.button("📥 Export Graph Data"):
-            export_data = export_graph_data(filtered_graph_data, export_format.lower())
-            st.download_button(
-                label=f"Download {export_format}",
-                data=export_data,
-                file_name=f"citegraph_{st.session_state.current_doi.replace('/', '_')}.{export_format.lower()}",
-                mime="text/plain"
-            )
-    
-    with col2:
-        # Export timeline data
-        if st.button("📊 Export Timeline"):
-            timeline_df = pd.DataFrame({
-                'Year': st.session_state.timeline_data['years'],
-                'Paper_Count': st.session_state.timeline_data['counts']
-            })
-            csv = timeline_df.to_csv(index=False)
-            st.download_button(
-                label="Download Timeline CSV",
-                data=csv,
-                file_name=f"timeline_{st.session_state.current_doi.replace('/', '_')}.csv",
-                mime="text/csv"
-            )
-    
-    with col3:
-        # Export paper list
-        if st.button("📄 Export Papers"):
-            papers_csv = papers_df.to_csv(index=False)
-            st.download_button(
-                label="Download Papers CSV",
-                data=papers_csv,
-                file_name=f"papers_{st.session_state.current_doi.replace('/', '_')}.csv",
-                mime="text/csv"
-            )
+            st.warning("No papers match the current filters.")
+
+    with tab_export:
+        st.header("💾 Export & Share")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            export_format = st.selectbox("Export Format:", ["JSON", "CSV"])
+            if st.button("📥 Export Graph Data"):
+                export_data = export_graph_data(filtered_graph_data, export_format.lower())
+                st.download_button(
+                    label=f"Download {export_format}",
+                    data=export_data,
+                    file_name=f"citegraph_{st.session_state.current_doi.replace('/', '_')}.{export_format.lower()}",
+                    mime="text/plain"
+                )
+        with col2:
+            if st.button("📊 Export Timeline"):
+                timeline_df = pd.DataFrame({
+                    'Year': st.session_state.timeline_data['years'],
+                    'Paper_Count': st.session_state.timeline_data['counts']
+                })
+                csv = timeline_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Timeline CSV",
+                    data=csv,
+                    file_name=f"timeline_{st.session_state.current_doi.replace('/', '_')}.csv",
+                    mime="text/csv"
+                )
+        with col3:
+            if 'papers_df' not in locals():
+                papers_df = pd.DataFrame(filtered_nodes)
+            if not papers_df.empty and st.button("📄 Export Papers"):
+                papers_csv = papers_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Papers CSV",
+                    data=papers_csv,
+                    file_name=f"papers_{st.session_state.current_doi.replace('/', '_')}.csv",
+                    mime="text/csv"
+                )
+
+    with tab_debug:
+        with st.expander("🔍 DEBUG: Graph Data Details", expanded=False):
+            st.write("**Current Graph Data:**")
+            st.write(f"**Total Nodes:** {len(filtered_graph_data['nodes'])}")
+            st.write(f"**Total Edges:** {len(filtered_graph_data['edges'])}")
+            if filtered_graph_data['nodes']:
+                st.write("**Nodes by Group:**")
+                groups = {}
+                for node in filtered_graph_data['nodes']:
+                    group = node.get('group', 'unknown')
+                    groups[group] = groups.get(group, 0) + 1
+                for group, count in groups.items():
+                    st.write(f"- {group}: {count} papers")
+                st.write("**Sample Nodes:**")
+                for i, node in enumerate(filtered_graph_data['nodes'][:5]):
+                    st.write(f"{i+1}. {node.get('title', 'No title')} ({node.get('group', 'No group')})")
+            if filtered_graph_data['edges']:
+                st.write("**Sample Edges:**")
+                for i, edge in enumerate(filtered_graph_data['edges'][:5]):
+                    st.write(f"{i+1}. {edge['from']} → {edge['to']} ({edge.get('color', 'No color')})")
 
 else:
     # Welcome screen
