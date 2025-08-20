@@ -8,6 +8,8 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
+import hashlib
+import secrets
 
 
 class CitationDatabase:
@@ -23,6 +25,20 @@ class CitationDatabase:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
+            # Users table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE,
+                    email TEXT UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    password_salt TEXT NOT NULL,
+                    password_iters INTEGER NOT NULL DEFAULT 200000,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login TIMESTAMP
+                )
+            """)
+
             # Papers table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS papers (
@@ -166,6 +182,69 @@ class CitationDatabase:
         except Exception as e:
             print(f"Error saving references: {e}")
     
+    # --- Authentication helpers ---
+    def _hash_password(self, password: str, salt: Optional[str] = None, iters: int = 200000) -> Tuple[str, str, int]:
+        """Hash a password with PBKDF2-HMAC-SHA256. Returns (hash_hex, salt_hex, iterations)."""
+        if not salt:
+            salt = secrets.token_hex(16)
+        # Derive key
+        dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), bytes.fromhex(salt), iters)
+        return dk.hex(), salt, iters
+
+    def create_user(self, username: str, email: str, password: str) -> Tuple[bool, str]:
+        """Create a user account. Returns (success, message)."""
+        try:
+            password_hash, salt, iters = self._hash_password(password)
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO users (username, email, password_hash, password_salt, password_iters)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (username.strip(), email.strip().lower(), password_hash, salt, iters)
+                )
+                conn.commit()
+            return True, "User created successfully."
+        except sqlite3.IntegrityError as e:
+            if 'users.username' in str(e).lower():
+                return False, "Username already exists."
+            if 'users.email' in str(e).lower():
+                return False, "Email already in use."
+            return False, "Integrity error while creating user."
+        except Exception as e:
+            return False, f"Error creating user: {e}"
+
+    def verify_user_credentials(self, username_or_email: str, password: str) -> Tuple[bool, Optional[Dict]]:
+        """Verify credentials and return user dict on success."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                key = username_or_email.strip()
+                # Find by username or email
+                cursor.execute(
+                    """
+                    SELECT id, username, email, password_hash, password_salt, password_iters
+                    FROM users
+                    WHERE username = ? OR email = ?
+                    """,
+                    (key, key.lower())
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False, None
+                user_id, username, email, stored_hash, salt, iters = row
+                # Verify password
+                check_hash, _, _ = self._hash_password(password, salt=salt, iters=iters)
+                if secrets.compare_digest(check_hash, stored_hash):
+                    # Update last_login
+                    cursor.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.now(), user_id))
+                    conn.commit()
+                    return True, {"id": user_id, "username": username, "email": email}
+                return False, None
+        except Exception:
+            return False, None
+
     def get_paper(self, doi: str) -> Optional[Dict]:
         """Retrieve paper metadata by DOI"""
         try:

@@ -641,8 +641,77 @@ top_relevant_n = st.sidebar.slider(
     help="Number of most relevant papers to highlight"
 )
 
-# Main content area
-if st.session_state.current_doi and st.session_state.current_paper:
+# --- Authentication UI (modal) ---
+if 'auth_user' not in st.session_state:
+    st.session_state.auth_user = None
+if '_auth_prompted' not in st.session_state:
+    st.session_state._auth_prompted = False
+
+def open_auth_dialog():
+    @st.experimental_dialog("🔐 Authentication")
+    def _dialog():
+        auth_tab = st.radio("", ["Login", "Sign up"], horizontal=True)
+        if auth_tab == "Login":
+            login_id = st.text_input("Username or Email", key="login_id")
+            login_pw = st.text_input("Password", type="password", key="login_pw")
+            col_a, col_b = st.columns([1,1])
+            with col_a:
+                if st.button("Sign in", type="primary"):
+                    ok, user = db.verify_user_credentials(login_id, login_pw)
+                    if ok and user:
+                        st.session_state.auth_user = user
+                        st.success("Logged in successfully")
+                        time.sleep(0.3)
+                        st.rerun()
+                    else:
+                        st.error("Invalid credentials")
+            with col_b:
+                if st.button("Cancel"):
+                    st.stop()
+        else:
+            su_username = st.text_input("Username", key="su_username")
+            su_email = st.text_input("Email", key="su_email")
+            su_pw = st.text_input("Password", type="password", key="su_pw")
+            su_pw2 = st.text_input("Confirm Password", type="password", key="su_pw2")
+            col_a, col_b = st.columns([1,1])
+            with col_a:
+                if st.button("Create account", type="primary"):
+                    if su_pw != su_pw2:
+                        st.error("Passwords do not match")
+                    elif not su_username or not su_email or not su_pw:
+                        st.error("All fields are required")
+                    else:
+                        ok, msg = db.create_user(su_username, su_email, su_pw)
+                        if ok:
+                            st.success("Account created. Please sign in.")
+                        else:
+                            st.error(msg)
+            with col_b:
+                if st.button("Cancel"):
+                    st.stop()
+    _dialog()
+
+# Sidebar account control
+with st.sidebar.container():
+    st.markdown("---")
+    st.subheader("Account")
+    if st.session_state.auth_user:
+        st.caption(f"Signed in as: {st.session_state.auth_user['username']}")
+        if st.button("Log out", use_container_width=True):
+            st.session_state.auth_user = None
+            st.session_state._auth_prompted = False
+            st.rerun()
+    else:
+        if st.button("Sign in / Sign up", type="primary", use_container_width=True):
+            open_auth_dialog()
+
+# Auto-open auth dialog once if not signed in
+if st.session_state.auth_user is None and not st.session_state._auth_prompted:
+    st.session_state._auth_prompted = True
+    open_auth_dialog()
+
+# Main content area (guarded by auth)
+if st.session_state.auth_user and st.session_state.current_doi and st.session_state.current_paper:
     # Paper information section
     st.header("📄 Paper Information")
     
@@ -1150,7 +1219,9 @@ if st.session_state.current_doi and st.session_state.current_paper:
                 for i, edge in enumerate(filtered_graph_data['edges'][:5]):
                     st.write(f"{i+1}. {edge['from']} → {edge['to']} ({edge.get('color', 'No color')})")
 
-else:
+elif st.session_state.auth_user is None:
+    st.info("Please sign in to use CiteGraph.")
+elif not (st.session_state.current_doi and st.session_state.current_paper):
     # Welcome screen
     st.markdown("""
     <div class="info-box">
