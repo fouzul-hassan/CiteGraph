@@ -689,11 +689,11 @@ if st.session_state.current_doi and st.session_state.current_paper:
                 
                 # Highlight top 5 most relevant papers
                 for i, rel_paper in enumerate(most_relevant[:5]):
-                    print(f"🔍 DEBUG: Top relevant paper {i+1}: {rel_paper['doi']} (score: {rel_paper['relevance_score']})")
+                    print(f"🔍 DEBUG: Top relevant paper {i+1}: {rel_paper['id']} (score: {rel_paper['relevance_score']})")
                     
                     # Update node to highlight as most relevant
                     for node in st.session_state.graph_data['nodes']:
-                        if node['id'] == rel_paper['doi']:
+                        if node['id'] == rel_paper['id']:
                             node['group'] = 'most_relevant'
                             node['label'] = f"⭐ {node['label']}"  # Add star to label
                             break
@@ -818,10 +818,10 @@ if st.session_state.current_doi and st.session_state.current_paper:
                 with st.expander(f"#{i+1} - {paper['title']} (Score: {paper['relevance_score']})"):
                     col1, col2 = st.columns([3, 1])
                     with col1:
-                        st.write(f"**DOI:** {paper['doi']}")
+                        st.write(f"**ID:** {paper['id']}")
                         if paper.get('authors'):
                             st.write(f"**Authors:** {', '.join(paper['authors'])}")
-                        st.write(f"**Journal:** {paper['journal']} ({paper['year']})")
+                        st.write(f"**Journal:** {paper.get('journal', 'N/A')} ({paper.get('year', 'N/A')})")
                         if paper.get('abstract'):
                             st.write(f"**Abstract:** {paper['abstract']}")
                         if paper.get('keywords'):
