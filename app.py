@@ -11,12 +11,18 @@ from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from concurrent.futures import ThreadPoolExecutor
 
 # Import our custom modules
 from db import CitationDatabase
 from graph_utils import CitationGraphBuilder, CitationGraphVisualizer, export_graph_data
 
 # CrossRef API functions
+# Polite usage header per Crossref guidelines
+CROSSREF_HEADERS = {
+    "User-Agent": "CiteGraph/1.0 (mailto:your-email@example.com)"
+}
+@st.cache_data(show_spinner=False, ttl=3600)
 def fetch_paper_from_crossref(doi: str) -> dict:
     """Fetch paper metadata from CrossRef API"""
     try:
@@ -24,7 +30,7 @@ def fetch_paper_from_crossref(doi: str) -> dict:
         url = f"https://api.crossref.org/works/{doi}"
         print(f"🔍 DEBUG: Paper fetch URL: {url}")
         
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, headers=CROSSREF_HEADERS)
         response.raise_for_status()
         
         data = response.json()
@@ -60,6 +66,7 @@ def fetch_paper_from_crossref(doi: str) -> dict:
         print(f"❌ DEBUG: Error fetching from CrossRef: {e}")
         return None
 
+@st.cache_data(show_spinner=False, ttl=3600)
 def fetch_citations_from_crossref(doi: str, limit: int = 20) -> list:
     """Fetch papers that cite the given DOI from CrossRef"""
     try:
@@ -124,6 +131,7 @@ def fetch_citations_from_crossref(doi: str, limit: int = 20) -> list:
         print(f"❌ DEBUG: Error fetching citations: {e}")
         return []
 
+@st.cache_data(show_spinner=False, ttl=3600)
 def fetch_citations_for_cited_papers(cited_papers: list, depth: int = 1, limit_per_paper: int = 5) -> dict:
     """Recursively fetch citations for cited papers to find most cited and relevant papers"""
     try:
@@ -258,6 +266,7 @@ def find_most_relevant_papers(papers: list, keywords: list = None) -> list:
         print(f"❌ DEBUG: Error finding relevant papers: {e}")
         return papers
 
+@st.cache_data(show_spinner=False, ttl=3600)
 def fetch_references_from_crossref(doi: str, limit: int = 20) -> list:
     """Fetch papers that the given DOI references from CrossRef"""
     try:
@@ -274,7 +283,7 @@ def fetch_references_from_crossref(doi: str, limit: int = 20) -> list:
         # CrossRef doesn't provide full reference details in the main endpoint
         # We need to get the paper details which might include some reference info
         url = f"https://api.crossref.org/works/{doi}"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, headers=CROSSREF_HEADERS)
         response.raise_for_status()
         
         data = response.json()
@@ -283,18 +292,20 @@ def fetch_references_from_crossref(doi: str, limit: int = 20) -> list:
         
         print(f"🔍 DEBUG: Found {len(references)} references in paper data")
         
+        # Concurrently fetch reference paper details
         reference_papers = []
+        dois = []
         for i, ref in enumerate(references[:limit]):
             if ref.get('DOI'):
-                print(f"🔍 DEBUG: Processing reference {i+1}: {ref.get('DOI')}")
-                ref_paper = fetch_paper_from_crossref(ref['DOI'])
-                if ref_paper:
-                    reference_papers.append(ref_paper)
-                    print(f"✅ DEBUG: Added reference paper: {ref_paper['title'][:50]}...")
-                else:
-                    print(f"❌ DEBUG: Could not fetch reference paper: {ref.get('DOI')}")
+                print(f"🔍 DEBUG: Queueing reference {i+1}: {ref.get('DOI')}")
+                dois.append(ref['DOI'])
             else:
                 print(f"⚠️ DEBUG: Reference {i+1} has no DOI: {ref}")
+
+        with ThreadPoolExecutor(max_workers=min(8, len(dois) or 1)) as executor:
+            for ref_paper in executor.map(fetch_paper_from_crossref, dois):
+                if ref_paper:
+                    reference_papers.append(ref_paper)
         
         print(f"🔍 DEBUG: Total reference papers found: {len(reference_papers)}")
         return reference_papers
@@ -311,44 +322,112 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Theme-aware CSS (light/dark/system via CSS variables)
 st.markdown("""
 <style>
+    :root {
+        --bg: #ffffff;
+        --text: #2c3e50;
+        --muted: #7f8c8d;
+        --panel-bg: #f8f9fa;
+        --shadow: rgba(0,0,0,0.08);
+        --primary: #3498db;
+        --secondary: #e74c3c;
+        --success-bg: #e6f7ed;
+        --success-border: #2ecc71;
+        --warn-bg: #fff8e1;
+        --warn-border: #f1c40f;
+        --info-bg: #eaf4ff;
+        --info-border: #3498db;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #0e1117;
+            --text: #eaecee;
+            --muted: #a3aab2;
+            --panel-bg: #161b22;
+            --shadow: rgba(0,0,0,0.35);
+            --primary: #58a6ff;
+            --secondary: #ff7b72;
+            --success-bg: rgba(46, 204, 113, 0.12);
+            --success-border: #2ecc71;
+            --warn-bg: rgba(241, 196, 15, 0.12);
+            --warn-border: #f1c40f;
+            --info-bg: rgba(88,166,255,0.12);
+            --info-border: #58a6ff;
+        }
+    }
+    /* Manual overrides via data-theme attribute */
+    [data-theme="light"] {
+        --bg: #ffffff;
+        --text: #2c3e50;
+        --muted: #7f8c8d;
+        --panel-bg: #f8f9fa;
+        --shadow: rgba(0,0,0,0.08);
+        --primary: #3498db;
+        --secondary: #e74c3c;
+        --success-bg: #e6f7ed;
+        --success-border: #2ecc71;
+        --warn-bg: #fff8e1;
+        --warn-border: #f1c40f;
+        --info-bg: #eaf4ff;
+        --info-border: #3498db;
+    }
+    [data-theme="dark"] {
+        --bg: #0e1117;
+        --text: #eaecee;
+        --muted: #a3aab2;
+        --panel-bg: #161b22;
+        --shadow: rgba(0,0,0,0.35);
+        --primary: #58a6ff;
+        --secondary: #ff7b72;
+        --success-bg: rgba(46, 204, 113, 0.12);
+        --success-border: #2ecc71;
+        --warn-bg: rgba(241, 196, 15, 0.12);
+        --warn-border: #f1c40f;
+        --info-bg: rgba(88,166,255,0.12);
+        --info-border: #58a6ff;
+    }
+
     .main-header {
         font-size: 3rem;
-        color: #2c3e50;
+        color: var(--text);
         text-align: center;
         margin-bottom: 1rem;
-        background: linear-gradient(90deg, #3498db, #e74c3c);
+        background: linear-gradient(90deg, var(--primary), var(--secondary));
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
     .metric-card {
-        background-color: #f8f9fa;
+        background-color: var(--panel-bg);
+        color: var(--text);
         padding: 1rem;
         border-radius: 0.5rem;
-        border-left: 4px solid #3498db;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid var(--primary);
+        box-shadow: 0 2px 4px var(--shadow);
     }
     .info-box {
-        background-color: #e8f4fd;
+        background-color: var(--info-bg);
+        color: var(--text);
         padding: 1rem;
         border-radius: 0.5rem;
-        border-left: 4px solid #3498db;
+        border-left: 4px solid var(--info-border);
         margin: 1rem 0;
     }
     .success-box {
-        background-color: #d4edda;
+        background-color: var(--success-bg);
+        color: var(--text);
         padding: 1rem;
         border-radius: 0.5rem;
-        border-left: 4px solid #28a745;
+        border-left: 4px solid var(--success-border);
         margin: 1rem 0;
     }
     .warning-box {
-        background-color: #fff3cd;
+        background-color: var(--warn-bg);
+        color: var(--text);
         padding: 1rem;
         border-radius: 0.5rem;
-        border-left: 4px solid #ffc107;
+        border-left: 4px solid var(--warn-border);
         margin: 1rem 0;
     }
 </style>
@@ -384,10 +463,64 @@ visualizer = init_visualizer()
 
 # Header
 st.markdown('<h1 class="main-header">📚 CiteGraph</h1>', unsafe_allow_html=True)
-st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #7f8c8d;">Research Citation Visualization & Knowledge Evolution Timeline</p>', unsafe_allow_html=True)
+st.markdown('<p style="text-align: center; font-size: 1.2rem; color: var(--muted);">Research Citation Visualization & Knowledge Evolution Timeline</p>', unsafe_allow_html=True)
 
 # Sidebar
 st.sidebar.header("🔍 Search & Controls")
+
+# Theme selector
+theme_choice = "Light"
+
+# Apply theme attribute to document root for CSS variables
+_theme_attr = "system" if theme_choice == "System" else theme_choice.lower()
+# Override CSS variables directly when Light/Dark is chosen (scripts are blocked in Streamlit)
+if _theme_attr in ("light", "dark"):
+    if _theme_attr == "light":
+        st.markdown(
+            """
+            <style>
+            :root {
+                --bg: #ffffff;
+                --text: #2c3e50;
+                --muted: #7f8c8d;
+                --panel-bg: #f8f9fa;
+                --shadow: rgba(0,0,0,0.08);
+                --primary: #3498db;
+                --secondary: #e74c3c;
+                --success-bg: #e6f7ed;
+                --success-border: #2ecc71;
+                --warn-bg: #fff8e1;
+                --warn-border: #f1c40f;
+                --info-bg: #eaf4ff;
+                --info-border: #3498db;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <style>
+            :root {
+                --bg: #0e1117;
+                --text: #eaecee;
+                --muted: #a3aab2;
+                --panel-bg: #161b22;
+                --shadow: rgba(0,0,0,0.35);
+                --primary: #58a6ff;
+                --secondary: #ff7b72;
+                --success-bg: rgba(46, 204, 113, 0.12);
+                --success-border: #2ecc71;
+                --warn-bg: rgba(241, 196, 15, 0.12);
+                --warn-border: #f1c40f;
+                --info-bg: rgba(88,166,255,0.12);
+                --info-border: #58a6ff;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
 # DOI input
 doi_input = st.sidebar.text_input(
@@ -558,12 +691,18 @@ if st.session_state.current_doi and st.session_state.current_paper:
                 'root_doi': paper['doi']
             }
             
-            # Fetch real references (papers this paper cites)
-            st.info("🔍 Fetching references...")
-            print(f"🔍 DEBUG: Starting to fetch references for {paper['doi']}")
-            references = fetch_references_from_crossref(paper['doi'], limit=15)
-            print(f"🔍 DEBUG: Got {len(references)} references from CrossRef")
-            
+            # Fetch references and citations concurrently
+            st.info("🔍 Fetching references & citations...")
+            print(f"🔍 DEBUG: Concurrent fetch for references & citations for {paper['doi']}")
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                ref_future = executor.submit(fetch_references_from_crossref, paper['doi'], 15)
+                cit_future = executor.submit(fetch_citations_from_crossref, paper['doi'], 15)
+                references = ref_future.result()
+                citations = cit_future.result()
+
+            print(f"🔍 DEBUG: Got {len(references)} references and {len(citations)} citations")
+
+            # Add references to graph
             for i, ref_paper in enumerate(references):
                 print(f"🔍 DEBUG: Adding reference paper {i+1}: {ref_paper['doi']}")
                 st.session_state.graph_data['nodes'].append({
@@ -580,13 +719,8 @@ if st.session_state.current_doi and st.session_state.current_paper:
                     'arrows': 'to',
                     'color': '#ff7675'
                 })
-            
-            # Fetch real citations (papers that cite this paper)
-            st.info("🔍 Fetching citations...")
-            print(f"🔍 DEBUG: Starting to fetch citations for {paper['doi']}")
-            citations = fetch_citations_from_crossref(paper['doi'], limit=15)
-            print(f"🔍 DEBUG: Got {len(citations)} citations from CrossRef")
-            
+
+            # Add citations to graph
             for i, cit_paper in enumerate(citations):
                 print(f"🔍 DEBUG: Adding citation paper {i+1}: {cit_paper['doi']}")
                 st.session_state.graph_data['nodes'].append({
@@ -830,7 +964,8 @@ if st.session_state.current_doi and st.session_state.current_paper:
             physics_enabled=physics_enabled,
             layout='hierarchical' if layout_choice == 'Hierarchical' else 'force',
             scale_by_citations=scale_by_citations,
-            show_legend=show_legend
+            show_legend=show_legend,
+            theme=_theme_attr
         )
         st.components.v1.html(network_html, height=650)
         st.download_button(

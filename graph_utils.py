@@ -217,7 +217,8 @@ class CitationGraphVisualizer:
         physics_enabled: bool = True,
         layout: str = "force",
         scale_by_citations: bool = True,
-        show_legend: bool = True
+        show_legend: bool = True,
+        theme: str = "system"
     ) -> str:
         """Create an interactive network visualization using pyvis
 
@@ -230,8 +231,16 @@ class CitationGraphVisualizer:
             show_legend: Include a floating legend overlay
         """
         try:
+            # Colors per theme
+            is_dark = False
+            if theme == 'dark':
+                is_dark = True
+            # 'system' will default to light background; app page CSS handles overall bg
+            bg_color = "#0e1117" if is_dark else "#ffffff"
+            font_color = "#eaecee" if is_dark else "#000000"
+
             # Create pyvis network
-            net = Network(height=height, width="100%", bgcolor="#ffffff", font_color="#000000")
+            net = Network(height=height, width="100%", bgcolor=bg_color, font_color=font_color)
 
             # Determine scaling
             max_citations = 0
@@ -371,10 +380,11 @@ class CitationGraphVisualizer:
             # Save to HTML string
             html_string = net.generate_html()
 
-            # Inject legend overlay
+            # Inject legend overlay (theme-aware text color)
             if show_legend:
                 legend_html = (
                     "<div style=\"position:fixed; right:16px; bottom:16px; background:rgba(255,255,255,0.9);"
+                    + ("color:#eaecee; background:rgba(14,17,23,0.92);" if is_dark else "color:#2c3e50;") +
                     "padding:12px 14px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.15);"
                     "font-family:Inter,system-ui,Segoe UI,Roboto,Arial; font-size:13px; z-index:9999;\">"
                     "<div style=\"font-weight:600; margin-bottom:6px;\">Legend</div>"
